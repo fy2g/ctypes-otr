@@ -14,11 +14,10 @@ let otrPriv = {
     let args = window.arguments[0].wrappedJSObject;
     let priv = document.getElementById("priv");
     priv.textContent = _("priv.account", args.account, args.protocol);
-    setTimeout(function() {
-      otr._generatePrivateKey(args.account, args.protocol);
+    otr._generatePrivateKey(args.account, args.protocol).then(function() {
       // document.documentElement.acceptDialog();
       document.documentElement.getButton("accept").disabled = false;
-    }, 1000);
+    });  // FIXME: handle err
   }
 
 };

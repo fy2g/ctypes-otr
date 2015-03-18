@@ -4,11 +4,13 @@ const { interfaces: Ci, utils: Cu, classes: Cc } = Components;
 
 Cu.import("resource:///modules/imServices.jsm");
 Cu.import("resource:///modules/imXPCOMUtils.jsm");
+Cu.import("resource://gre/modules/PromiseWorker.jsm");
 Cu.import("resource://gre/modules/ctypes.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("chrome://otr/content/libotr.js");
 
 const privDialog = "chrome://otr/content/priv.xul";
+const workerUri = "chrome://otr/content/worker.js";
 
 XPCOMUtils.defineLazyGetter(this, "_", function()
   l10nHelper("chrome://otr/locale/otr.properties")
@@ -173,10 +175,26 @@ let otr = {
     args.wrappedJSObject = args;
     Services.ww.openWindow(null, privDialog, _("priv.label"), features, args);
   },
+
   _generatePrivateKey: function(account, protocol) {
-    if (libOTR.otrl_privkey_generate(
-      this.userstate, this.privateKeyPath, account, protocol
-    )) throw new Error("Failed to generate private key.");
+    let newkey = new ctypes.void_t.ptr();
+    let err = libOTR.otrl_privkey_generate_start(
+      otr.userstate, account, protocol, newkey.address()
+    );
+    // FIXME: check err for GPG_ERR_EEXIST
+    let worker = new BasePromiseWorker(workerUri);
+    worker.log = function(...msg) {
+      Cu.reportError(msg);
+    };
+    return worker.post("generateKey", [
+      libOTR.path, libOTR.os, libOTR.otrl_version, newkey
+    ]).then(function() {
+      let err = libOTR.otrl_privkey_generate_finish(newkey, this.privateKeyPath);
+    }.bind(this)).catch(function(err) {
+      if (!newkey.isNull())
+        libOTR.otrl_privkey_generate_cancelled(newkey);
+      throw err;
+    });
   },
 
   // write fingerprints to file synchronously
